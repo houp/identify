@@ -124,7 +124,7 @@ t=4 best=100.000 (0) pm=0.000 min_e=0 max=100.000 avg=96.984 min=0.565 r[1]=0.00
 Solutions radius: 2
 0,0,0,0,1,0,0,1,1,1,0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,0,0,0,0,1,1,0
 RES: OK iter=3 dist=10
-1.000000 1.000000 0
+fitness unmasker = 1.000000; fitness masked = 1.000000; errors count = 0
 ```
 
 Let us discuss the meaning of the lines observed. First the initial diagnostic lines:
