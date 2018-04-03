@@ -4,7 +4,9 @@
 
 #include "main.h"
 
-//#define _LOG
+// turns on/off verbose logging (this includes population statistics)
+// NOTE: this affects performance! 
+#define _LOG
 
 // minimal radius
 #define MIN_RAD 2
