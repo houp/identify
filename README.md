@@ -6,13 +6,14 @@ by W. Bołt, J.M. Baetens and B. De Baets (to be published in 2018).
 
 ## Building
 
-The main code (see: *spatial.c* file) is written in C language (C99 standard) and it is known to work on Linux and OS X platforms. There are known issues with running it on Windows (yet it should be relatively easy do port it).
+The main code (see: *spatial.c* file) is written in C language (C99 standard) and it is known to work on Linux and MacOS platforms. There are known issues with running it on Windows (yet it should be relatively easy to port it).
 
-To build the source code you need to have a recent version of GCC, Clang or Intel C/C++ (icc) compiler. In case of GCC you want to have a version with OpenMP support. In case of Clang, note that OpenMP is not supported and thus performance will be lower!
+To build the source code you need to have a recent version of GCC or Intel C/C++ (icc) compiler. In case of GCC you want to have a version with OpenMP support. 
+Clang should also work (yet, not build script is provided), but keep in mind that OpenMP is not supported (at least not on MacOS) and thus performance will be lower!
 
 In addition you need to have recent version of GNU Scientific Library (GSL) installed. Official site: [http://www.gnu.org/software/gsl/](http://www.gnu.org/software/gsl/), and binaries can be easily found in common repositories (apt-get, yum, brew, *etc.*).
 
-For convenience simple building scripts are provided for GCC and icc. See: *build.sh* for GCC and *build_icc.sh* for icc. Note that *build_gcc.sh* should not be used in most cases.
+For convenience simple building scripts are provided for GCC and icc. See: *build_gcc.sh* for GCC and *build_icc.sh* for icc. 
 
 The supplied build scripts require one parameter to be provided - the build identifier, which is used as a base name for the binaries generated. For example:
 
