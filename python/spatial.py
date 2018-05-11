@@ -147,7 +147,6 @@ def id_error_step(lut, input, target_output):
 def id_error_step_gap(lut, input, target_output, max_gap=10):
     error = np.zeros(max_gap)
     current_input = input
-    min_error = input.shape[0]
     outputs = []
 
     for i in range(0, max_gap):
