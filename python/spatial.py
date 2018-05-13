@@ -1,7 +1,7 @@
 import numpy as np
 
-ca_min_radius = 1
-ca_max_radius = 5
+ca_min_radius = 2
+ca_max_radius = 2
 
 
 def ca_get_radius(lut):
@@ -12,8 +12,12 @@ def ca_decode_rule(rule_num, radius):
     return np.array([int(c) for c in bin(rule_num)[2:].zfill(2**(2*radius+1))]).astype(np.int8)
 
 
+def tool_random_binary_vector(lenght):
+    return np.random.random(lenght).round().astype(np.int8)
+
+
 def ca_init_random(radius):
-    return np.random.random(2**(2*radius+1)).round().astype(np.int8)
+    return tool_random_binary_vector(2**(2*radius+1))
 
 
 def ca_downscale_lut(lut, check=True):
@@ -54,7 +58,7 @@ def ca_upscale_lut(lut, check=True):
 
     lenSmall = lut.shape[0]
     lenBig = lenSmall * 4
-    lenBigHalf = lenBig / 2
+    lenBigHalf = int(lenBig / 2)
     lutBig = np.zeros(lenBig, dtype=np.int8)
     for i in range(0, lenSmall):
         a = lut[i]
@@ -105,7 +109,7 @@ def ca_dist(lut1, lut2, upscale=False):
 def ca_equal(lut1, lut2):
     return ca_dist(lut1, lut2) == 0
 
-
+# TODO: this should be cached
 def ca_get_pows(len):
     t = 2*len+1
     return np.array([2**x for x in range(t-1, -1, -1)])
@@ -125,18 +129,30 @@ def ca_apply(lut, input):
     radius = ca_get_radius(lut)
     pows = ca_get_pows(radius)
     input_len = input.shape[0]
+
     idxs = (pows * np.array([ca_conf_nei(input, i, radius)
                              for i in range(0, input_len)])).sum(1)
-    return np.choose(idxs, lut)
+
+    # return np.array([lut[idxs[i]] for i in range(0, input_len)], dtype=np.int8)
+    return np.take(lut, idxs)
 
 
 def conf_diff(a, b):
     idxs = np.where(np.logical_and(a >= 0, b >= 0))[0]
-    return np.abs(np.choose(idxs, a) - np.choose(idxs, b)).sum()
+    return np.abs(np.take(a, idxs) - np.take(b, idxs)).sum()
 
 
 def conf_is_complete(conf):
     return conf.min() >= 0
+
+# TODO: this needs refactoring, eliminating for loop should be possible
+def conf_complete(src, comp):
+    result = np.copy(src)
+    l = result.shape[0]
+    for t in range(0, l):
+        if(result[t] < 0):
+            result[t] = comp[t]
+    return result
 
 
 def id_error_step(lut, input, target_output):
@@ -145,11 +161,11 @@ def id_error_step(lut, input, target_output):
 
 
 def id_error_step_gap(lut, input, target_output, max_gap=10):
-    error = np.zeros(max_gap)
+    error = np.zeros(max_gap+1, dtype=np.int64)
     current_input = input
     outputs = []
 
-    for i in range(0, max_gap):
+    for i in range(0, max_gap+1):
         e, current_input = id_error_step(lut, current_input, target_output)
         error[i] = e
         outputs.append(current_input)
@@ -159,3 +175,141 @@ def id_error_step_gap(lut, input, target_output, max_gap=10):
         return (min_err, outputs[error.argmin()])
 
     return (min_err, outputs[np.random.choice(np.where(error == min_err)[0])])
+
+
+def id_error(lut, image, max_gap=10):
+    input = image[0]
+    time_steps = image.shape[0]
+    result = 0
+    for t in range(0, time_steps-1):
+        output = image[t+1]
+        err, rule_output = id_error_step_gap(lut, input, output, max_gap)
+        result += err
+        if(not conf_is_complete(output)):
+            input = conf_complete(output, rule_output)
+        else:
+            input = output
+
+    return result
+
+# TODO: this needs refactoring to eliminate for loop
+def evolve_mutate(lut, pm):
+    if(np.random.rand() < pm):
+        ca_upscale_lut(lut)
+
+    l = lut.shape[0]
+
+    for t in range(0, l):
+        if(np.random.rand() < pm):
+            lut[t] = 1 - lut[t]
+
+    if(np.random.rand() < pm):
+        ca_downscale_lut(lut)
+
+    return lut
+
+
+def evolve_cross(lut1, lut2):
+    if(lut1.shape[0] == lut2.shape[0]):
+        p = np.random.random(lut1.shape[0]).round().astype(np.int8)
+        return p*lut1 + (1-p)*lut2
+    else:
+        r1 = ca_get_radius(lut1)
+        r2 = ca_get_radius(lut2)
+        target_r = np.random.randint(min(r1, r2), max(r1, r2)+1)
+        return evolve_cross(ca_set_radius(lut1, target_r), ca_set_radius(lut2, target_r))
+
+
+def evolve_fitness(lut, images, total_cell_count, max_gap=10):
+    result = 0
+    x = images.shape[0]
+    for i in range(0, x):
+        result += id_error(lut, images[i], max_gap)
+
+    return np.float64(total_cell_count - result) / total_cell_count
+
+
+def id_total_cell_count(images):
+    non_gap = np.count_nonzero(images+1)
+    x, _, z = images.shape
+    return non_gap - x*z
+
+
+def evolve_recalc_fitness(population, images, total_cell_count, max_gap=10):
+    def fit(lut): return evolve_fitness(lut, images, total_cell_count, max_gap)
+    fitness = np.array([fit(lut) for lut in population])
+    return (fitness, fitness / np.sum(fitness))
+
+
+def evolve_get_stats(fitness):
+    return (np.min(fitness), np.mean(fitness), np.std(fitness), np.max(fitness))
+
+
+def evolve_select_parent(population, pfitness):
+    return population[np.random.choice(range(0, len(population)), p=pfitness)]
+
+
+def evolve_build_new_individual(population, pfitness, pm):
+    lut1 = evolve_select_parent(population, pfitness)
+    lut2 = evolve_select_parent(population, pfitness)
+    return evolve_mutate(evolve_cross(lut1, lut2), pm)
+
+
+def evolve_build_new_population(population, pfitness, pm, count):
+    return [evolve_build_new_individual(population, pfitness, pm) for _ in range(0, count)]
+
+
+def evolve_algoritm(images, iterations=5, pm=0.01, max_gap=10, population_size=16):
+    old_population = [ca_init_random(np.random.randint(
+        ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
+
+    total_cell_count = id_total_cell_count(images)
+    best = old_population[0]
+
+    for i in range(0, iterations):
+        fitness, pfitness = evolve_recalc_fitness(
+            old_population, images, total_cell_count, max_gap)
+        print(i+1, evolve_get_stats(fitness))
+        best = old_population[np.argmax(fitness)]
+        if(np.max(fitness) == 1.0):
+            break
+
+        new_population = evolve_build_new_population(
+            old_population, pfitness, pm, len(old_population)-4)
+        idxs = np.argsort(fitness)
+        elite = [old_population[idxs[-1*i]] for i in range(1, 5)]
+        old_population = new_population + elite
+
+    return best
+
+
+def test_make_spatial(vector, ps):
+    l = vector.shape[0]
+    r = np.random.random(l)
+    for i in range(0, l):
+        if (r[i] < ps):
+            vector[i] = -1
+    return vector
+
+
+def test_get_image(lut, initial_conf, time_steps, max_gap=10, ps=0):
+    result = np.array([initial_conf for _ in range(0, time_steps)])
+    cur = initial_conf
+    for t in range(1, time_steps):
+        for _ in range(0, np.random.randint(1, max_gap+2)):
+            cur = ca_apply(lut, cur)
+        result[t] = test_make_spatial(cur, ps)
+    return result
+
+
+def test_prepare_images(lut, image_count, time_steps, cell_count, max_gap=10, ps=0):
+    return np.array([test_get_image(lut, tool_random_binary_vector(cell_count), time_steps, max_gap, ps) for _ in range(0, image_count)], dtype=np.int8)
+
+
+import sys
+solution = ca_decode_rule(int(sys.argv[1]), 1)
+images = test_prepare_images(solution, 16, 48, 48)
+
+best = evolve_algoritm(images)
+print("BEST individual: ", best)
+print("SOLUTIONS: ", ca_upscale_lut(solution, check=False))
