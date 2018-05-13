@@ -1,7 +1,7 @@
 import numpy as np
 
-ca_min_radius = 2
-ca_max_radius = 2
+ca_min_radius = 1
+ca_max_radius = 1
 
 
 def ca_get_radius(lut):
@@ -32,7 +32,7 @@ def ca_downscale_lut(lut, check=True):
         return lut
 
     lenBig = lut.shape[0]
-    lenSmall = lenBig / 4
+    lenSmall = int(lenBig / 4)
     black_count = np.zeros(lenSmall, dtype=np.int8)
 
     for i in range(0, lenBig):
@@ -109,7 +109,7 @@ def ca_dist(lut1, lut2, upscale=False):
 def ca_equal(lut1, lut2):
     return ca_dist(lut1, lut2) == 0
 
-# TODO: this should be cached
+
 def ca_get_pows(len):
     t = 2*len+1
     return np.array([2**x for x in range(t-1, -1, -1)])
@@ -127,13 +127,12 @@ def ca_conf_nei(conf, index, r):
 
 def ca_apply(lut, input):
     radius = ca_get_radius(lut)
-    pows = ca_get_pows(radius)
+    pows = global_pows[radius-ca_min_radius]
     input_len = input.shape[0]
 
     idxs = (pows * np.array([ca_conf_nei(input, i, radius)
                              for i in range(0, input_len)])).sum(1)
 
-    # return np.array([lut[idxs[i]] for i in range(0, input_len)], dtype=np.int8)
     return np.take(lut, idxs)
 
 
@@ -146,6 +145,8 @@ def conf_is_complete(conf):
     return conf.min() >= 0
 
 # TODO: this needs refactoring, eliminating for loop should be possible
+
+
 def conf_complete(src, comp):
     result = np.copy(src)
     l = result.shape[0]
@@ -193,8 +194,10 @@ def id_error(lut, image, max_gap=10):
     return result
 
 # TODO: this needs refactoring to eliminate for loop
+
+
 def evolve_mutate(lut, pm):
-    if(np.random.rand() < pm):
+    if(ca_min_radius < ca_max_radius and np.random.rand() < pm):
         ca_upscale_lut(lut)
 
     l = lut.shape[0]
@@ -203,7 +206,7 @@ def evolve_mutate(lut, pm):
         if(np.random.rand() < pm):
             lut[t] = 1 - lut[t]
 
-    if(np.random.rand() < pm):
+    if(ca_min_radius < ca_max_radius and np.random.rand() < pm):
         ca_downscale_lut(lut)
 
     return lut
@@ -250,16 +253,14 @@ def evolve_select_parent(population, pfitness):
 
 
 def evolve_build_new_individual(population, pfitness, pm):
-    lut1 = evolve_select_parent(population, pfitness)
-    lut2 = evolve_select_parent(population, pfitness)
-    return evolve_mutate(evolve_cross(lut1, lut2), pm)
+    return evolve_mutate(evolve_cross(evolve_select_parent(population, pfitness), evolve_select_parent(population, pfitness)), pm)
 
 
 def evolve_build_new_population(population, pfitness, pm, count):
     return [evolve_build_new_individual(population, pfitness, pm) for _ in range(0, count)]
 
 
-def evolve_algoritm(images, iterations=5, pm=0.01, max_gap=10, population_size=16):
+def evolve_algoritm(images, iterations=5, pm=0.01, max_gap=10, population_size=16, elite_size=8):
     old_population = [ca_init_random(np.random.randint(
         ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
 
@@ -269,15 +270,19 @@ def evolve_algoritm(images, iterations=5, pm=0.01, max_gap=10, population_size=1
     for i in range(0, iterations):
         fitness, pfitness = evolve_recalc_fitness(
             old_population, images, total_cell_count, max_gap)
+
         print(i+1, evolve_get_stats(fitness))
+
         best = old_population[np.argmax(fitness)]
         if(np.max(fitness) == 1.0):
             break
 
         new_population = evolve_build_new_population(
-            old_population, pfitness, pm, len(old_population)-4)
+            old_population, pfitness, pm, population_size - elite_size)
+
         idxs = np.argsort(fitness)
-        elite = [old_population[idxs[-1*i]] for i in range(1, 5)]
+        elite = [old_population[idxs[-1*i]] for i in range(1, elite_size+1)]
+
         old_population = new_population + elite
 
     return best
@@ -292,7 +297,7 @@ def test_make_spatial(vector, ps):
     return vector
 
 
-def test_get_image(lut, initial_conf, time_steps, max_gap=10, ps=0):
+def test_get_image(lut, initial_conf, time_steps, max_gap=10, ps=0.0):
     result = np.array([initial_conf for _ in range(0, time_steps)])
     cur = initial_conf
     for t in range(1, time_steps):
@@ -302,14 +307,27 @@ def test_get_image(lut, initial_conf, time_steps, max_gap=10, ps=0):
     return result
 
 
-def test_prepare_images(lut, image_count, time_steps, cell_count, max_gap=10, ps=0):
+def test_prepare_images(lut, image_count, time_steps, cell_count, max_gap=10, ps=0.0):
     return np.array([test_get_image(lut, tool_random_binary_vector(cell_count), time_steps, max_gap, ps) for _ in range(0, image_count)], dtype=np.int8)
 
 
-import sys
-solution = ca_decode_rule(int(sys.argv[1]), 1)
-images = test_prepare_images(solution, 16, 48, 48)
+global_pows = np.array([ca_get_pows(r)
+                        for r in range(ca_min_radius, ca_max_radius+1)])
 
-best = evolve_algoritm(images)
-print("BEST individual: ", best)
-print("SOLUTIONS: ", ca_upscale_lut(solution, check=False))
+import sys
+
+try:
+    solution = ca_decode_rule(int(sys.argv[1]), 1)
+
+    print("Preparing test images... ")
+    images = test_prepare_images(solution, 16, 48, 48)
+
+    print("Starting identfication algorithm")
+    best = evolve_algoritm(images)
+
+    print("BEST individual: ", best)
+    print("TARG individial: ", solution)
+
+except:
+    print("Usage: python3 ./spatial.py [ECA rule number]")
+    print("   ECA rule number = 0, 1, ..., 255")
