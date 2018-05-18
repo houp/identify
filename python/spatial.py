@@ -1,15 +1,18 @@
 import numpy as np
+from keras.models import Sequential
+from keras.layers import Dense
 
-ca_min_radius = 1
-ca_max_radius = 1
-
+ca_min_radius = 2
+ca_max_radius = 2
 
 def ca_get_radius(lut):
     return int((np.log2(lut.shape[0])-1)/2)
 
+def ca_lut_len(radius):
+    return 2**(2*radius+1)
 
 def ca_decode_rule(rule_num, radius):
-    return np.array([int(c) for c in bin(rule_num)[2:].zfill(2**(2*radius+1))]).astype(np.int8)
+    return np.array([int(c) for c in bin(rule_num)[2:].zfill(ca_lut_len(radius))]).astype(np.int8)
 
 
 def tool_random_binary_vector(lenght):
@@ -17,7 +20,7 @@ def tool_random_binary_vector(lenght):
 
 
 def ca_init_random(radius):
-    return tool_random_binary_vector(2**(2*radius+1))
+    return tool_random_binary_vector(ca_lut_len(radius))
 
 
 def ca_downscale_lut(lut, check=True):
@@ -223,20 +226,44 @@ def evolve_cross(lut1, lut2):
         return evolve_cross(ca_set_radius(lut1, target_r), ca_set_radius(lut2, target_r))
 
 
+def neural_get_model(afun='relu', layer_count=1):
+    input_len = ca_lut_len(ca_max_radius)
+    model = Sequential()
+    model.add(Dense(input_len, input_dim=input_len, activation=afun))
+
+    for _ in range(0, layer_count):
+        model.add(Dense(256, activation=afun))
+
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(loss='mean_squared_error', optimizer='adam')
+    return model
+
+
+def neural_train_model(model, X, Y, epc=256, bs = 8):
+    model.fit(x = X, y = Y, epochs=epc, batch_size=bs, verbose=0, shuffle=True)
+    return model
+
+
+fitness_cache = {}
+
 def evolve_fitness(lut, images, total_cell_count, max_gap=10):
-    result = 0
-    x = images.shape[0]
-    for i in range(0, x):
-        result += id_error(lut, images[i], max_gap)
+    key = ''.join([str(x) for x in lut])
+    try:
+        return fitness_cache[key][1]
+    except:
+        result = 0
+        image_count = images.shape[0]
+        for i in range(0, image_count):
+            result += id_error(lut, images[i], max_gap)
 
-    return np.float64(total_cell_count - result) / total_cell_count
-
+        fitness = np.float64(total_cell_count - result) / total_cell_count
+        fitness_cache[key] = (lut,fitness)
+        return fitness
 
 def id_total_cell_count(images):
     non_gap = np.count_nonzero(images+1)
     x, _, z = images.shape
     return non_gap - x*z
-
 
 def evolve_recalc_fitness(population, images, total_cell_count, max_gap=10):
     def fit(lut): return evolve_fitness(lut, images, total_cell_count, max_gap)
@@ -260,30 +287,68 @@ def evolve_build_new_population(population, pfitness, pm, count):
     return [evolve_build_new_individual(population, pfitness, pm) for _ in range(0, count)]
 
 
-def evolve_algoritm(images, iterations=5, pm=0.01, max_gap=10, population_size=16, elite_size=8):
+def neural_unpack_cache():
+    v = fitness_cache.values()
+    return np.array([l[0] for l in v]), np.array([l[1] for l in v])
+
+def evolve_global_elite(elite_size = 4):
+    X,Y = neural_unpack_cache()
+    idxs = np.argsort(Y)
+    print([Y[idxs[-1*i]] for i in range(1, elite_size+1)])
+    return [X[idxs[-1*i]] for i in range(1, elite_size+1)]
+
+def neural_build_model(model = None):
+    if(not model):
+        model = neural_get_model()
+    X, Y = neural_unpack_cache()
+    model = neural_train_model(model, X, Y)
+    return model
+
+def neural_recalc_fitness(model, population):
+    X = np.array(population)
+    fitness = model.predict(X).reshape(len(population))
+    return (fitness, fitness / np.sum(fitness))
+
+
+def evolve_algoritm(images, iterations=50000, pm=0.01, max_gap=10, population_size=128, elite_size=16):
     old_population = [ca_init_random(np.random.randint(
         ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
 
     total_cell_count = id_total_cell_count(images)
     best = old_population[0]
-
+    model = None
+    model_age = 0
     for i in range(0, iterations):
-        fitness, pfitness = evolve_recalc_fitness(
-            old_population, images, total_cell_count, max_gap)
+        if(((not model) and (len(fitness_cache) > 2*population_size)) or (model_age > 50)):
+            print("Building new neural net", end=" ")
+            model_age = 0
+            model = neural_build_model()
+            print("Done!")
 
-        print(i+1, evolve_get_stats(fitness))
+
+        if(model):
+            fitness, pfitness = neural_recalc_fitness(model, old_population)
+            model_age += 1
+        else:
+            fitness, pfitness = evolve_recalc_fitness(
+                old_population, images, total_cell_count, max_gap)
 
         best = old_population[np.argmax(fitness)]
-        if(np.max(fitness) == 1.0):
-            break
-
+       
         new_population = evolve_build_new_population(
             old_population, pfitness, pm, population_size - elite_size)
 
         idxs = np.argsort(fitness)
-        elite = [old_population[idxs[-1*i]] for i in range(1, elite_size+1)]
+        elite = [old_population[idxs[-1*i]] for i in range(1, int(elite_size/2)+1)]
 
-        old_population = new_population + elite
+        elite_fitness, _ = evolve_recalc_fitness(elite, images, total_cell_count, max_gap)
+
+        print(i+1, evolve_get_stats(fitness), evolve_get_stats(elite_fitness), len(fitness_cache))
+
+        if(np.max(elite_fitness) == 1.0):
+            break
+
+        old_population = new_population + elite + evolve_global_elite(int(elite_size/2))
 
     return best
 
@@ -316,18 +381,24 @@ global_pows = np.array([ca_get_pows(r)
 
 import sys
 
+target_rule = -1
 try:
-    solution = ca_decode_rule(int(sys.argv[1]), 1)
-
-    print("Preparing test images... ")
-    images = test_prepare_images(solution, 16, 48, 48)
-
-    print("Starting identfication algorithm")
-    best = evolve_algoritm(images)
-
-    print("BEST individual: ", best)
-    print("TARG individial: ", solution)
-
+    target_rule = int(sys.argv[1])
 except:
     print("Usage: python3 ./spatial.py [ECA rule number]")
     print("   ECA rule number = 0, 1, ..., 255")
+    exit(-1)
+
+solution = ca_decode_rule(target_rule, 1)
+solution = ca_set_radius(solution,ca_min_radius)
+
+
+print("Preparing test images... ")
+images = test_prepare_images(solution, 16, 48, 48)
+
+print("Starting identfication algorithm")
+best = evolve_algoritm(images)
+
+print("BEST individual: ", best)
+print("TARG individial: ", solution)
+
