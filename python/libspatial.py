@@ -18,6 +18,10 @@ def ca_decode_rule(rule_num, radius):
     return np.array([int(c) for c in bin(rule_num)[2:].zfill(ca_lut_len(radius))]).astype(np.int8)
 
 
+def ca_decode_rule_bool(rule_num, radius):
+    return [bool(c) for c in bin(rule_num)[2:].zfill(ca_lut_len(radius))]
+
+
 def tool_random_binary_vector(lenght):
     return np.random.random(lenght).round().astype(np.int8)
 
@@ -250,17 +254,41 @@ def neural_train_model(model, X, Y, epc=256, bs=8):
 fitness_cache = {}
 
 
+import ctypes
+import platform
+
+
+def lib_name(name):
+    if(platform.system() == "Darwin"):
+        ext = ".dylib"
+    elif(platform.system() == "Linux"):
+        ext = ".so"
+    else:
+        ext = ".dll"
+
+    return name + ext
+
+
+lut_types = {}
+for radius in range(1, ca_max_radius+1):
+    lut_types[radius] = ctypes.c_bool * ca_lut_len(radius)
+
+gslcblas = ctypes.CDLL(lib_name('libgslcblas'), mode=ctypes.RTLD_GLOBAL)
+libspatial = ctypes.CDLL(lib_name('libspatial'))
+libspatial.lib_find_fitness.restype = ctypes.c_double
+
+
+def tool_array_to_ctype(lut):
+    return lut_types[ca_get_radius(lut)](*list(lut))
+
+
 def evolve_fitness(lut, images, total_cell_count, max_gap=10):
     key = ''.join([str(x) for x in lut])
     try:
         return fitness_cache[key][1]
     except:
-        result = 0
-        image_count = images.shape[0]
-        for i in range(0, image_count):
-            result += id_error(lut, images[i], max_gap)
-
-        fitness = np.float64(total_cell_count - result) / total_cell_count
+        fitness = libspatial.lib_find_fitness(
+            tool_array_to_ctype(lut), ca_get_radius(lut))
         fitness_cache[key] = (lut, fitness)
         return fitness
 
@@ -301,7 +329,6 @@ def neural_unpack_cache():
 def evolve_global_elite(elite_size=4):
     X, Y = neural_unpack_cache()
     idxs = np.argsort(Y)
-    print([Y[idxs[-1*i]] for i in range(1, elite_size+1)])
     return [X[idxs[-1*i]] for i in range(1, elite_size+1)]
 
 
@@ -319,11 +346,15 @@ def neural_recalc_fitness(model, population):
     return (fitness, fitness / np.sum(fitness))
 
 
-def evolve_algoritm(images, iterations=50000, pm=0.01, max_gap=10, population_size=128, elite_size=16):
+def evolve_algoritm(images=None, iterations=50000, pm=0.015, max_gap=10, population_size=256, elite_size=32):
     old_population = [ca_init_random(np.random.randint(
         ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
 
-    total_cell_count = id_total_cell_count(images)
+    if(images == None):
+        total_cell_count = -1
+    else:
+        total_cell_count = id_total_cell_count(images)
+
     best = old_population[0]
     model = None
     model_age = 0
@@ -333,6 +364,7 @@ def evolve_algoritm(images, iterations=50000, pm=0.01, max_gap=10, population_si
             model_age = 0
             model = neural_build_model()
             print("Done!")
+            pass
 
         if(model):
             fitness, pfitness = neural_recalc_fitness(model, old_population)
@@ -348,7 +380,7 @@ def evolve_algoritm(images, iterations=50000, pm=0.01, max_gap=10, population_si
 
         idxs = np.argsort(fitness)
         elite = [old_population[idxs[-1*i]]
-                 for i in range(1, int(elite_size/2)+1)]
+                 for i in range(1, elite_size+1)]
 
         elite_fitness, _ = evolve_recalc_fitness(
             elite, images, total_cell_count, max_gap)
@@ -359,8 +391,7 @@ def evolve_algoritm(images, iterations=50000, pm=0.01, max_gap=10, population_si
         if(np.max(elite_fitness) == 1.0):
             break
 
-        old_population = new_population + elite + \
-            evolve_global_elite(int(elite_size/2))
+        old_population = new_population + elite
 
     return best
 
@@ -401,15 +432,11 @@ except:
     print("   ECA rule number = 0, 1, ..., 255")
     exit(-1)
 
-solution = ca_decode_rule(target_rule, 1)
-solution = ca_set_radius(solution, ca_min_radius)
-
-
-print("Preparing test images... ")
-images = test_prepare_images(solution, 16, 48, 48)
+print("Initializing C library...")
+libspatial.lib_init(tool_array_to_ctype(
+    ca_decode_rule(target_rule, 1)), 1, 64, 0)
 
 print("Starting identfication algorithm")
-best = evolve_algoritm(images)
+best = evolve_algoritm()
 
 print("BEST individual: ", best)
-print("TARG individial: ", solution)

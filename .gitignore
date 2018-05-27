@@ -1,2 +1,5 @@
 builds/*
 .vscode/*
+python/libspatial.dylib
+python/libspatial.so
+python/libspatial.dll
