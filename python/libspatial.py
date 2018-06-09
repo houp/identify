@@ -22,7 +22,7 @@ def lib_name(name):
 
 
 gslcblas = ctypes.CDLL(lib_name('libgslcblas'), mode=ctypes.RTLD_GLOBAL)
-libspatial = ctypes.CDLL(lib_name('libspatial'))
+libspatial = ctypes.CDLL(lib_name('./libspatial'))
 libspatial.lib_find_fitness.restype = ctypes.c_double
 
 
