@@ -8,7 +8,7 @@ import sys
 ca_min_radius = 2
 ca_max_radius = 2
 fitness_cache = {}
-
+max_best_age = 250
 
 def lib_name(name):
     if(platform.system() == "Darwin"):
@@ -43,7 +43,12 @@ def ca_decode_rule_bool(rule_num, radius):
 
 
 def tool_random_binary_vector(lenght):
-    return np.random.random(lenght).round().astype(np.int8)
+    result = np.zeros(lenght)
+    for i in range(0,lenght):
+        r = np.random.rand()
+        if(np.random.rand() < r):
+            result[i]=1
+    return result.astype(np.int8)
 
 
 def ca_init_random(radius):
@@ -147,7 +152,7 @@ def evolve_cross(lut1, lut2):
         return evolve_cross(ca_set_radius(lut1, target_r), ca_set_radius(lut2, target_r))
 
 
-def neural_get_model(afun='tanh', layer_count=1):
+def neural_get_model(afun='tanh', layer_count=2):
     input_len = ca_lut_len(ca_max_radius)
     model = Sequential()
     model.add(Dense(input_len, input_dim=input_len, activation=afun))
@@ -241,14 +246,32 @@ def neural_recalc_fitness(model, population):
     return (fitness, fitness / np.sum(fitness))
 
 
-def evolve_algoritm(iterations=50000, pm=0.015, max_gap=10, population_size=64, elite_size=1):
+def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size=128, elite_size=8):
     old_population = [ca_init_random(np.random.randint(
         ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
 
     best = old_population[0]
+    best_age = 0
+    best_fitness = 0.0
+
     model = None
     model_age = 0
     for i in range(0, iterations):
+        pm = np.exp(-0.025 * (max_best_age - best_age))
+
+        if (pm > 1.0):
+            pm = 1.0
+        if (pm < base_pm):
+            pm = base_pm
+   
+        if(best_age > max_best_age):
+            best_age = 0
+            best_fitness = 0.0
+            model = None
+            model_age = 0
+            print("Reset of population!")
+            old_population = [ca_init_random(np.random.randint(ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
+
         if(((not model) and (len(fitness_cache) > 6*population_size))):
             print("Building new neural net", end=" ")
             model_age = 0
@@ -256,7 +279,7 @@ def evolve_algoritm(iterations=50000, pm=0.015, max_gap=10, population_size=64, 
             print("Done!")
             pass
 
-        if(model_age > 100):
+        if(model_age > 25):
             model = None
 
         if(model):
@@ -267,6 +290,13 @@ def evolve_algoritm(iterations=50000, pm=0.015, max_gap=10, population_size=64, 
 
         best = old_population[np.argmax(fitness)]
 
+        tmpmax = np.max(fitness)
+        if(tmpmax > best_fitness):
+            best_fitness = tmpmax
+            best_age = 0
+        else:
+            best_age += 1
+
         new_population = evolve_build_new_population(
             old_population, pfitness, pm, population_size - elite_size)
 
@@ -276,7 +306,7 @@ def evolve_algoritm(iterations=50000, pm=0.015, max_gap=10, population_size=64, 
 
         elite_fitness, _ = evolve_recalc_fitness(elite)
 
-        print(i+1, evolve_get_stats(fitness),
+        print(i+1, pm, best_age, evolve_get_stats(fitness),
               evolve_get_stats(elite_fitness), len(fitness_cache))
 
         if(np.max(elite_fitness) == 1.0):
