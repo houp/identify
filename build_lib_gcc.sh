@@ -9,5 +9,6 @@ else
     ext='dll'
 fi
 
-gcc spatial.c tools.c -o python/libspatial.$ext -shared -lgsl -std=gnu99 -DLOG -fopenmp -Wall -O3 -fPIC -march=native -D_BUILD_LIB -D_GNU_SOURCE
-strip python/libspatial.$ext
+
+gcc spatial.c tools.c -o $1.$ext -shared -lgsl -std=gnu99 -DLOG -fopenmp -Wall -O3 -fPIC -march=native -D_BUILD_LIB -D_GNU_SOURCE
+strip $1.$ext
