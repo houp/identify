@@ -4,6 +4,7 @@ from keras.layers import Dense
 import ctypes
 import platform
 import sys
+import os
 
 ca_min_radius = 2
 ca_max_radius = 2
@@ -22,7 +23,8 @@ def lib_name(name):
 
 
 gslcblas = ctypes.CDLL(lib_name('libgslcblas'), mode=ctypes.RTLD_GLOBAL)
-libspatial = ctypes.CDLL(lib_name('./libspatial'))
+pathname = os.path.dirname(sys.argv[0])
+libspatial = ctypes.CDLL(lib_name(os.path.abspath(pathname)+'/libspatial'))
 libspatial.lib_find_fitness.restype = ctypes.c_double
 
 
