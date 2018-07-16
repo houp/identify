@@ -212,7 +212,9 @@ def evolve_select_parent(population, pfitness):
 
 
 def evolve_build_new_individual(population, pfitness, pm):
-    return evolve_mutate(evolve_cross(evolve_select_parent(population, pfitness), evolve_select_parent(population, pfitness)), pm)
+    return evolve_mutate(
+        evolve_cross(evolve_select_parent(population, pfitness), 
+                     evolve_select_parent(population, pfitness)), pm)
 
 
 def evolve_build_new_population(population, pfitness, pm, count):
@@ -241,10 +243,13 @@ def neural_build_model(model=None):
 def neural_recalc_fitness(model, population):
     X = np.array(population)
     fitness = model.predict(X).reshape(len(population))
+
+    # TODO: check if this makes sense
     for i in range(0, len(population)):
         cached = evolve_cached_fitness(population[i])
         if(cached != None):
             fitness[i] = cached
+   
     return (fitness, fitness / np.sum(fitness))
 
 
@@ -258,7 +263,9 @@ def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size
 
     model = None
     model_age = 0
+
     for i in range(0, iterations):
+        # dynamic mutation probability dependent on the best age
         pm = np.exp(-0.025 * (max_best_age - best_age))
 
         if (pm > 1.0):
@@ -266,6 +273,7 @@ def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size
         if (pm < base_pm):
             pm = base_pm
    
+        # restart
         if(best_age > max_best_age):
             best_age = 0
             best_fitness = 0.0
@@ -274,6 +282,7 @@ def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size
             print("Reset of population!")
             old_population = [ca_init_random(np.random.randint(ca_min_radius, ca_max_radius+1)) for _ in range(0, population_size)]
 
+        # build neural model
         if(((not model) and (len(fitness_cache) > 6*population_size))):
             print("Building new neural net", end=" ")
             model_age = 0
@@ -281,9 +290,10 @@ def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size
             print("Done!")
             pass
 
-        if(model_age > 25):
+        if(model_age > 250):
             model = None
 
+        # counting fitness values
         if(model):
             fitness, pfitness = neural_recalc_fitness(model, old_population)
             model_age += 1
@@ -312,6 +322,7 @@ def evolve_algoritm(iterations=50000, base_pm=0.015, max_gap=10, population_size
               evolve_get_stats(elite_fitness), len(fitness_cache))
 
         if(np.max(elite_fitness) == 1.0):
+            best = elite[np.argmax(elite_fitness)]
             break
 
         old_population = new_population + elite
